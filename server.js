@@ -3,9 +3,11 @@ var mongoose = require("mongoose");
 var app = express();
 var bodyParser = require('body-parser');    
 app.use(bodyParser.urlencoded({'extended':'true'}));            // parse application/x-www-form-urlencoded
+const { celebrate, Joi, errors, Segments } = require('celebrate');
 app.use(bodyParser.json());                                     // parse application/json
 app.use(bodyParser.json({ type: 'application/vnd.api+json' }));
 var database = require("./config/database");
+
 
 mongoose.connect(database.url);
 var Movie = require('./models/movie');
@@ -20,47 +22,45 @@ const connectDB = async () => {
   }
   const { validationResult, query } = require('express-validator');
 
-  app.get('/api/movies', [
-    query('page').optional().isInt().toInt(),
-    query('perPage').optional().isInt().toInt(),
-    query('title').optional().isString().trim(),
-  ], async (req, res) => {
-    try {
-      // Validate query parameters
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-      }
-  
-      const { page, perPage, title } = req.query;
-  
-      // Convert page and perPage to integers
-      const pageNumber = page || 1;
-      const itemsPerPage = perPage || 10;
-  
-      let query = {};
-  
-      // If title is provided, add it to the query
-      if (title) {
-        query.title = { $regex: new RegExp(title, 'i') };
-      }
-  
-      const movies = await Movie.find(query)
-        .skip((pageNumber - 1) * itemsPerPage)
-        .limit(itemsPerPage);
-  
-      res.json({
-        page: pageNumber,
-        perPage: itemsPerPage,
-        total: await Movie.countDocuments(query),
-        movies: movies,
-      });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Internal Server Error' });
+
+app.get('/api/movies', celebrate({
+  [Segments.QUERY]: Joi.object().keys({
+    page: Joi.number().integer().min(1),
+    perPage: Joi.number().integer().min(1),
+    title: Joi.string().trim(),
+  }),
+}), async (req, res) => {
+  try {
+    const { page, perPage, title } = req.query;
+
+    // Convert page and perPage to integers with default values
+    const pageNumber = parseInt(page, 10) || 1;
+    const itemsPerPage = parseInt(perPage, 10) || 10;
+
+    let query = {};
+
+    // If title is provided, add it to the query
+    if (title) {
+      query.title = { $regex: new RegExp(title, 'i') };
     }
-  });
-  
+
+    // Fetch movies based on the query parameters
+    const movies = await Movie.find(query)
+      .skip((pageNumber - 1) * itemsPerPage)
+      .limit(itemsPerPage);
+
+    res.json({
+      page: pageNumber,
+      perPage: itemsPerPage,
+      total: await Movie.countDocuments(query),
+      movies: movies,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 
   //Display the details of the a particular movie
   app.get('/api/movies/:id', async (req, res) => {
@@ -178,8 +178,11 @@ app.delete('/api/movies/:id', async (req, res) => {
   });
 
 
+app.all('*', (req, res) => {
+  res.status(404).send('404 - Not Found');
+});
 
-
+app.use(errors());
 
 connectDB().then(() => {
     app.listen(6000, () => {
